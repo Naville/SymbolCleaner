@@ -3,9 +3,13 @@
 from macholib import MachO
 from macholib import mach_o
 from macholib.ptypes import *
+from macholib import SymbolTable
 import os
 import sys
+from os import system
 
+#Need To Alter Symtab After New Mach-O Was Generated
+SYMTAB=dict()
 def main(executableName):
     print
     print 'MachO Headers Eraser'
@@ -24,7 +28,6 @@ def main(executableName):
     print '[+]Reading raw executable'
     machoHeader = MachO.MachO(executableName)
     print '[+]%s readed' % machoHeader.filename
-    
     for header in machoHeader.headers:
         eraseLoadCommandInHeader(header)
 
@@ -35,8 +38,16 @@ def main(executableName):
     print '[+]Overwriting raw executable'
     os.system('mv %s_tmp %s' % (executableName, executableName))
 
+    #Insert SYMTAB Operations Here
+    pathname = os.path.dirname(sys.argv[0]) 
+    Command= pathname+'/SymbolCleaner '+executableName+"_bak "+str(SYMTAB["symoff"])+" "+str(SYMTAB["nsyms"])+" 0 0 "+executableName+"NoSymbol"+" 64"
+
+    system(str(Command))
+
+
     print '[+]Giving execute permission to new executable'
     givex(executableName)
+    givex(executableName+"NoSymbol")
 
     print
     print '[+]All done.'
@@ -63,12 +74,18 @@ def spliceHeadersAndRawStuff(header, name):
     rawStuff.close()
     
     return
+        
+
+
 
 def eraseLoadCommandInHeader(header):
     ##################################################################
     # Add confirmed removeable stuff to the following lists or       #
     # remove the stuff which cause problems from the following lists #
     ##################################################################
+
+
+
     safeRemoveList_segname = ['__PAGEZERO'
                               #, '__DATA'
                                       ]
@@ -81,10 +98,10 @@ def eraseLoadCommandInHeader(header):
                                '__eh_frame',
                                '__nl_symbol_ptr',
                                '__la_symbol_ptr',
-                               #'__objc_classlist',
+                               '__objc_classlist',
                                '__objc_classrefs',
-                               '__objc_superrefs',
-                               #'__objc_protolist',
+                                '__objc_superrefs',
+                               '__objc_protolist',
                                '__objc_msgrefs',
                                #'__objc_imageinfo',
                                '__objc_methname',
@@ -102,19 +119,20 @@ def eraseLoadCommandInHeader(header):
     print
     
     for idx in range(0,len(header.commands)):
+
         lc, cmd, data = header.commands[idx]
         
         if type(cmd) == mach_o.segment_command or type(cmd) == mach_o.segment_command_64:
             if checkStrInList(str(cmd.segname), safeRemoveList_segname):
                 print '[+]Erasing segname', cmd.segname
                 cmd.segname = '\0'
-
+            
             for sect in data:
                 if checkStrInList(str(sect.sectname), safeRemoveList_sectname):
                     print '[+]Erasing data for section', sect.sectname
                     sect.sectname = '\0'
                     sect.segname = '\0'
-                    sect.addr = 0
+                    #sect.addr = 0
                     sect.size = 4
                     sect.offset = os.path.getsize(sys.argv[1])
                     sect.align = 0
@@ -123,23 +141,31 @@ def eraseLoadCommandInHeader(header):
                     sect.flags = 0
                     sect.reserved1 = 0
                     sect.reserved2 = 0
-
+            
         if type(cmd) == mach_o.dyld_info_command:
             
             print '[+]Erasing part data for segment LC_LOAD_DYLINKER'
-            cmd.weak_bind_off = 0
+            cmd.weak_bind_off = os.path.getsize(sys.argv[1])-cmd.weak_bind_size
             cmd.weak_bind_size = 0
-            cmd.export_off = 0
+            cmd.export_off = os.path.getsize(sys.argv[1])-cmd.export_size
             cmd.export_size = 0
             
 
         if type(cmd) == mach_o.symtab_command:
             print '[+]Erasing data for segment LC_SYMTAB'
-            
+
+            #Save Original Value
+            SYMTAB["symoff"]=cmd.symoff
+            SYMTAB["nsyms"]=cmd.nsyms
+            SYMTAB["stroff"]=cmd.stroff
+            SYMTAB["strsize"]=cmd.strsize
+            #Change    
+                  
             cmd.symoff = 0
             cmd.nsyms = 0
             cmd.stroff = 0
             cmd.strsize = 0
+            
             
         if type(cmd) == mach_o.dysymtab_command:
             print '[+]Erasing data for segment LC_DYSYMTAB'
